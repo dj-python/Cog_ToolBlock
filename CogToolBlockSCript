@@ -64,7 +64,10 @@ public class CogToolBlockAdvancedScript : CogToolBlockAdvancedScriptBase
     int nArray_X = (int) ToolBlock_Spec.Outputs["Array_X"].Value;
     int nArray_Y = (int) ToolBlock_Spec.Outputs["Array_Y"].Value;
     int nNumtoFindID = nArray_X * nArray_Y;
+    int runSlotCount = Math.Min(nNumtoFindID, MAX_SLOT);
     double dPitchX = (double) ToolBlock_Spec.Outputs["Pitch_X_Pixel"].Value;
+    
+
     
     // ID 표시 레이블 초기화
     Label = new CogGraphicLabel[2][];
@@ -77,9 +80,9 @@ public class CogToolBlockAdvancedScript : CogToolBlockAdvancedScriptBase
     // 초기화 를 위해 2중 for 선언
     for(int idx = 0; idx < 2; idx++)
     {
-      if (ToolBlock_ID[idx].Inputs.Count < nNumtoFindID)
+      if (ToolBlock_ID[idx].Inputs.Count < runSlotCount)
       {
-        int nTemp = nNumtoFindID - ToolBlock_ID[idx].Inputs.Count;
+        int nTemp = runSlotCount - ToolBlock_ID[idx].Inputs.Count;
         for (int i = 0; i < nTemp; i++)
         {
           string sDate = DateTime.Now.ToString("yyyyMMddHHmmss");
@@ -87,16 +90,16 @@ public class CogToolBlockAdvancedScript : CogToolBlockAdvancedScriptBase
           ToolBlock_ID[idx].Inputs.Add(tempTerminal);
         }
       }
-      else if (ToolBlock_ID[idx].Inputs.Count > nNumtoFindID)
+      else if (ToolBlock_ID[idx].Inputs.Count > runSlotCount)
       {
-        int nTemp = ToolBlock_ID[idx].Inputs.Count - nNumtoFindID;
+        int nTemp = ToolBlock_ID[idx].Inputs.Count - runSlotCount;
         for (int i = 0; i < nTemp; i++)
         {
-          ToolBlock_ID[idx].Inputs.Remove((string) ToolBlock_ID[idx].Inputs[nNumtoFindID].Name);
+          ToolBlock_ID[idx].Inputs.Remove((string) ToolBlock_ID[idx].Inputs[runSlotCount].Name);
         }
       }    
     
-      for (int i = 0; i < nNumtoFindID; i++)
+      for (int i = 0; i < runSlotCount; i++)
       {
         string sTemp = "ID" + (i + 1).ToString();
         if (ToolBlock_ID[idx].Inputs[i].Name != sTemp)
@@ -122,7 +125,7 @@ public class CogToolBlockAdvancedScript : CogToolBlockAdvancedScriptBase
     // 2) 이번 기종에서 사용할 슬롯 수만큼만 ID Tool 실행 (좌/우)
     for (int idx = 0; idx < 2; idx++)
     {
-      for (int slot = 0; slot < nNumtoFindID; slot++)
+      for (int slot = 0; slot < runSlotCount; slot++)
       {
         ICogTool idTool = (ICogTool) IDTools_ID[idx][slot];
         mToolBlock.RunTool(idTool, ref message, ref result);
@@ -152,11 +155,11 @@ public class CogToolBlockAdvancedScript : CogToolBlockAdvancedScriptBase
       Font fFont = new Font(Label[idx][0].Font.Name, 6, FontStyle.Bold);
 
       // 이번 기종에서 사용할 슬롯 수만큼 문자열 배열 확보
-      sID[idx] = new string[nNumtoFindID];
+      sID[idx] = new string[runSlotCount];
 
       int nIDCount = 0; // (원하면) 인식 성공한 개수만 카운트
 
-      for (int slot = 0; slot < nNumtoFindID; slot++)
+      for (int slot = 0; slot < runSlotCount; slot++)
       {
         // 기본값: 미인식이면 빈 문자열
         sID[idx][slot] = "";
@@ -228,7 +231,7 @@ public class CogToolBlockAdvancedScript : CogToolBlockAdvancedScriptBase
     for(int idx = 0; idx < 2; idx++)
     {
       sData += "RECONID" + (idx + 1).ToString() + "," + sReconID[idx] + ",";
-      for (int i = 0; i < nNumtoFindID; i++)
+      for (int i = 0; i < runSlotCount; i++)
       {
         sData += (i + 1).ToString() + "," + sID[idx][i] + ",";
       }
