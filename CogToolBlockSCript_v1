@@ -1,0 +1,300 @@
+#region namespace imports
+using System;
+using System.Collections;
+using System.Drawing;
+using System.IO;
+using System.Windows.Forms;
+using Cognex.VisionPro;
+using Cognex.VisionPro.ToolBlock;
+using Cognex.VisionPro3D;
+using Cognex.VisionPro.ImageProcessing;
+using Cognex.VisionPro.ID;
+#endregion
+
+public class CogToolBlockAdvancedScript : CogToolBlockAdvancedScriptBase
+{
+  #region Private Member Variables
+  private Cognex.VisionPro.ToolBlock.CogToolBlock mToolBlock;
+  #endregion
+  
+  // ID 표시 레이블용 변수 조정 및 제품 ID와 ReconID를 분리 및 좌 우 구분을 위해 다중배열 선언
+  // 기존 코드 : CogGraphicLabel[] Label;
+  CogGraphicLabel[] ReconLabel;
+  CogGraphicLabel[][] Label;
+  
+  /// <summary>
+  /// Called when the parent tool is run.
+  /// Add code here to customize or replace the normal run behavior.
+  /// </summary>
+  /// <param name="message">Sets the Message in the tool's RunStatus.</param>
+  /// <param name="result">Sets the Result in the tool's RunStatus</param>
+  /// <returns>True if the tool should run normally,
+  ///          False if GroupRun customizes run behavior</returns>
+  public override bool GroupRun(ref string message, ref CogToolResultConstants result)
+  {
+    // To let the execution stop in this script when a debugger is attached, uncomment the following lines.
+    #if DEBUG
+    if (System.Diagnostics.Debugger.IsAttached) System.Diagnostics.Debugger.Break();
+    #endif
+    
+    CogToolBlock ToolBlock_Spec = (CogToolBlock) mToolBlock.Tools["CogToolBlock_Spec"];
+    // 좌우 Recon구분을 위해 배열로 수정
+    CogToolBlock[] ToolBlock_ID = {(CogToolBlock) mToolBlock.Tools["CogToolBlock_ID_L"],(CogToolBlock) mToolBlock.Tools["CogToolBlock_ID_R"]};
+    CogIDTool[] IDTool_ID = {(CogIDTool) mToolBlock.Tools["CogIDTool_ID_L"], (CogIDTool) mToolBlock.Tools["CogIDTool_ID_R"]};
+    CogIDTool[] IDTool_Recon = {(CogIDTool) mToolBlock.Tools["CogIDTool_Recon_L"],(CogIDTool) mToolBlock.Tools["CogIDTool_Recon_R"]};
+    int nArray_X = (int) ToolBlock_Spec.Outputs["Array_X"].Value;
+    int nArray_Y = (int) ToolBlock_Spec.Outputs["Array_Y"].Value;
+    int nNumtoFindID = nArray_X * nArray_Y;
+    double dPitchX = (double) ToolBlock_Spec.Outputs["Pitch_X_Pixel"].Value;
+    
+    // ID 표시 레이블 초기화
+    Label = new CogGraphicLabel[2][];
+    Label[0] = new CogGraphicLabel[nArray_X * nArray_Y];
+    Label[1] = new CogGraphicLabel[nArray_X * nArray_Y];
+    ReconLabel = new CogGraphicLabel[2];
+        
+    mToolBlock.Outputs["Result_Data"].Value = "";
+    
+    // 초기화 를 위해 2중 for 선언
+    for(int idx = 0; idx < 2; idx++)
+    {
+      if (ToolBlock_ID[idx].Inputs.Count < nNumtoFindID)
+      {
+        int nTemp = nNumtoFindID - ToolBlock_ID[idx].Inputs.Count;
+        for (int i = 0; i < nTemp; i++)
+        {
+          string sDate = DateTime.Now.ToString("yyyyMMddHHmmss");
+          CogToolBlockTerminal tempTerminal = new CogToolBlockTerminal("s" + sDate + i.ToString(), "");
+          ToolBlock_ID[idx].Inputs.Add(tempTerminal);
+        }
+      }
+      else if (ToolBlock_ID[idx].Inputs.Count > nNumtoFindID)
+      {
+        int nTemp = ToolBlock_ID[idx].Inputs.Count - nNumtoFindID;
+        for (int i = 0; i < nTemp; i++)
+        {
+          ToolBlock_ID[idx].Inputs.Remove((string) ToolBlock_ID[idx].Inputs[nNumtoFindID].Name);
+        }
+      }    
+    
+      for (int i = 0; i < nNumtoFindID; i++)
+      {
+        string sTemp = "ID" + (i + 1).ToString();
+        if (ToolBlock_ID[idx].Inputs[i].Name != sTemp)
+        {
+          ToolBlock_ID[idx].Inputs[i].Name = sTemp;
+        }
+        ToolBlock_ID[idx].Inputs[i].Value = "";
+        Label[idx][i] = new CogGraphicLabel();
+        Label[idx][i].Text = "";
+      }
+    }
+	
+    
+    // ID 툴에서 읽을 제품의 개수 선언
+    for(int i = 0; i < 2; i++)
+      IDTool_ID[i].RunParams.NumToFind = nNumtoFindID;
+    
+    // 툴 전체 실행
+    // Run each tool using the RunTool function
+    foreach(ICogTool tool in mToolBlock.Tools)
+      mToolBlock.RunTool(tool, ref message, ref result);
+    
+    // 툴 결과 표시 및 생성
+    // 결과 문자열
+    string[] sReconID = new string[2];
+    string[][] sID = new string[2][];
+    
+    int nResultCount = 0;
+    
+    // 좌 우 검사 결과 각각 표시 위해 2중 for 선언
+    for(int idx = 0; idx < 2; idx++)
+    {
+      // 검사 결과 읽은 코드 개수
+      int nIDCount = IDTool_ID[idx].Results.Count;      
+      nResultCount += nIDCount;
+      
+      // Y 중간 점 찾기 (위/아래 열 구분 위해)
+      double dMiddleY = 0;
+      for (int i = 0;i < nIDCount;i++)
+      {
+        dMiddleY += IDTool_ID[idx].Results[i].CenterY;
+      }
+      dMiddleY /= nIDCount; // dMiddleY 값보다 작으면 1열, 크면 2열
+    
+      // 표시 할 코드 레이블 폰트 설정
+      Font fFont = new Font(Label[idx][0].Font.Name, 6, FontStyle.Bold);
+	  
+      // ID 의 위치 정렬 위한 변수
+      int[] nIDNum = new int[nNumtoFindID];
+      sID[idx] = new string[nNumtoFindID];
+    
+      // 읽은 코드에서 가장 좌측 의 제품 X위치 찾기
+      double dMinX = ((Cognex.VisionPro.ICogImage) mToolBlock.Inputs["InputImage"].Value).Width;
+      for (int i = 0; i < nIDCount; i++)
+      {
+        // 첫 제품
+        dMinX = dMinX < IDTool_ID[idx].Results[i].CenterX ? dMinX : IDTool_ID[idx].Results[i].CenterX;
+      }
+    	  
+      for (int i = 0; i < nIDCount; i++)
+      {
+        // 현재 읽은 코드의 X, Y 위치 기준하여 몇번째 제품인지 특정
+        // X 첫 위치 기준 시작 위치 설정
+        int XPos = (int) ((IDTool_ID[idx].Results[i].CenterX - dMinX) / dPitchX);
+        int YPos = (int) (IDTool_ID[idx].Results[i].CenterY / dMiddleY) * nArray_X; // Y=2 경우만 고려
+        int nID = XPos + YPos;
+		
+        // 제품 위치 번호가 제품의 개수보다 클때 스킵
+        if (nID > nNumtoFindID)
+        {
+          continue;
+        }				
+
+        // 제품 위치에 맞춰 ID 보관      
+        sID[idx][nID] = IDTool_ID[idx].Results[i].DecodedData.DecodedString;
+        ToolBlock_ID[idx].Inputs[nID].Value = sID[idx][nID];
+      
+        // 읽은 코드 표시
+        double dArea = IDTool_ID[idx].Results[i].BoundsPolygon.Area;
+        Label[idx][nID].X = IDTool_ID[idx].Results[i].CenterX;
+        Label[idx][nID].Y = IDTool_ID[idx].Results[i].CenterY + Math.Sqrt(dArea) / 2 + 30;
+        Label[idx][nID].Text = "[" + (nID + 1).ToString() + "] " + sID[idx][nID];
+        Label[idx][nID].BackgroundColor = CogColorConstants.White;
+        Label[idx][nID].Color = CogColorConstants.Blue;
+        Label[idx][nID].Alignment = CogGraphicLabelAlignmentConstants.TopCenter;
+        Label[idx][nID].Font = fFont;
+      }
+        
+      // Recon ID 표시 초기화
+      ReconLabel[idx] = new CogGraphicLabel();
+      ReconLabel[idx].Text = "";
+						 
+      double dArea2 = 0.0;
+      ReconLabel[idx].X = 0.0;
+      ReconLabel[idx].Y = 0.0;
+	  
+      // Recon ID 표시
+      if (IDTool_Recon[idx].Results.Count > 0)
+      {
+        sReconID[idx] = IDTool_Recon[idx].Results[0].DecodedData.DecodedString;
+        dArea2 = IDTool_Recon[idx].Results[0].BoundsPolygon.Area;
+        ReconLabel[idx].X = IDTool_Recon[idx].Results[0].CenterX;
+        ReconLabel[idx].Y = IDTool_Recon[idx].Results[0].CenterY + Math.Sqrt(dArea2) / 2 + 30;
+      
+        ReconLabel[idx].Text = sReconID[idx];
+        ReconLabel[idx].BackgroundColor = CogColorConstants.White;
+        ReconLabel[idx].Color = CogColorConstants.Blue;
+        ReconLabel[idx].Alignment = CogGraphicLabelAlignmentConstants.TopCenter;
+        ReconLabel[idx].Font = fFont;
+      }
+    }
+    
+    // 결과 문자열 생성
+    string sData = "RESULT,";
+    for(int idx = 0; idx < 2; idx++)
+    {
+      sData += "RECONID" + (idx + 1).ToString() + "," + sReconID[idx] + ",";
+      for (int i = 0; i < nNumtoFindID; i++)
+      {
+        sData += (i + 1).ToString() + "," + sID[idx][i] + ",";
+      }
+    }
+    sData += "END";
+    mToolBlock.Outputs["Result_Data"].Value = sData;
+    
+    // 읽은 ID 개수
+    mToolBlock.Outputs["Result_Count"].Value = nResultCount;
+    
+    // 로그저장 사용 원한 다면 주석 해제
+    //WriteLog(sReconID[0], sID[0]);
+    //WriteLog(sReconID[1], sID[1]);
+    
+    return false;
+  }
+  
+  public void WriteLog(string sReconID, string[] sID)
+  {
+    string sDate = DateTime.Now.ToString("yyyyMMdd");
+    string sTime = DateTime.Now.ToString("HH:mm:ss") + "." + DateTime.Now.Millisecond.ToString("000");
+    string sDir = @"C:\Log\DetailLog\" + sDate + @"\";
+    
+    if (!Directory.Exists(@"D:\"))
+      sDir = @"C:\Log\DetailLog\" + sDate + @"\";
+    if (!Directory.Exists(sDir))
+      Directory.CreateDirectory(sDir);
+    
+    string sFileName = sDir + sDate + "_ID.txt";
+    string sTemp = "";
+    for (int i = 0; i < sID.Length; i++)
+    {
+      sTemp += "ID" + (i + 1).ToString();
+      if (i < sID.Length - 1)
+        sTemp += ", ";
+    }
+    sTemp += "\r\n";
+    if (!File.Exists(sFileName))
+      File.AppendAllText(sFileName, "Date, ReconID, " + sTemp);
+    File.AppendAllText(sFileName, sDate + " " + sTime + ", " + sReconID);
+    for (int i = 0; i < sID.Length; i++)
+    {
+      File.AppendAllText(sFileName, ", " + sID[i]);
+    }
+    File.AppendAllText(sFileName, "\r\n");
+  }
+  
+  #region When the Current Run Record is Created
+  /// <summary>
+  /// Called when the current record may have changed and is being reconstructed
+  /// </summary>
+  /// <param name="currentRecord">
+  /// The new currentRecord is available to be initialized or customized.</param>
+  public override void ModifyCurrentRunRecord(Cognex.VisionPro.ICogRecord currentRecord)
+  {
+  }
+  #endregion
+
+  #region When the Last Run Record is Created
+  /// <summary>
+  /// Called when the last run record may have changed and is being reconstructed
+  /// </summary>
+  /// <param name="lastRecord">
+  /// The new last run record is available to be initialized or customized.</param>
+  public override void ModifyLastRunRecord(Cognex.VisionPro.ICogRecord lastRecord)
+  {
+    if (Label == null)
+      return;
+  
+    // ID 결과 그래픽 Overlay 이미지에 추가
+    for (int i = 0; i < Label.Length; i++)      
+    {
+      for (int t = 0; t < Label[i].Length; t++)
+      {
+        mToolBlock.AddGraphicToRunRecord(Label[i][t], lastRecord, "CogImageConvertTool1.OutputImage", "script");
+      }
+    }
+    
+    for (int i = 0; i < ReconLabel.Length; i++)
+    {
+      mToolBlock.AddGraphicToRunRecord(ReconLabel[i], lastRecord, "CogImageConvertTool1.OutputImage", "script");
+    }
+  }
+  #endregion
+
+  #region When the Script is Initialized
+  /// <summary>
+  /// Perform any initialization required by your script here
+  /// </summary>
+  /// <param name="host">The host tool</param>
+  public override void Initialize(Cognex.VisionPro.ToolGroup.CogToolGroup host)
+  {
+    // DO NOT REMOVE - Call the base class implementation first - DO NOT REMOVE
+    base.Initialize(host);
+
+
+    // Store a local copy of the script host
+    this.mToolBlock = ((Cognex.VisionPro.ToolBlock.CogToolBlock) (host));
+  }
+  #endregion
+
+}
