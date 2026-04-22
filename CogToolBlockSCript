@@ -40,7 +40,21 @@ public class CogToolBlockAdvancedScript : CogToolBlockAdvancedScriptBase
     CogToolBlock ToolBlock_Spec = (CogToolBlock) mToolBlock.Tools["CogToolBlock_Spec"];
     // 좌우 Recon구분을 위해 배열로 수정
     CogToolBlock[] ToolBlock_ID = {(CogToolBlock) mToolBlock.Tools["CogToolBlock_ID_L"],(CogToolBlock) mToolBlock.Tools["CogToolBlock_ID_R"]};
-    CogIDTool[] IDTool_ID = {(CogIDTool) mToolBlock.Tools["CogIDTool_ID_L"], (CogIDTool) mToolBlock.Tools["CogIDTool_ID_R"]};
+    
+
+    int MAX_SLOT = 32;
+
+    CogIDTool[][] IDTools_ID = new CogIDTool[2][];
+    IDTools_ID[0] = new CogIDTool[MAX_SLOT]; // Left
+    IDTools_ID[1] = new CogIDTool[MAX_SLOT]; // Right
+
+    for (int i = 0; i < MAX_SLOT; i++)
+    {
+      IDTools_ID[0][i] = (CogIDTool) mToolBlock.Tools["CogIDTool_ID_L" + (i + 1).ToString()];
+      IDTools_ID[1][i] = (CogIDTool) mToolBlock.Tools["CogIDTool_ID_R" + (i + 1).ToString()];
+    }
+    
+    
     CogIDTool[] IDTool_Recon = {(CogIDTool) mToolBlock.Tools["CogIDTool_Recon_L"],(CogIDTool) mToolBlock.Tools["CogIDTool_Recon_R"]};
     int nArray_X = (int) ToolBlock_Spec.Outputs["Array_X"].Value;
     int nArray_Y = (int) ToolBlock_Spec.Outputs["Array_Y"].Value;
@@ -91,9 +105,7 @@ public class CogToolBlockAdvancedScript : CogToolBlockAdvancedScriptBase
     }
 	
     
-    // ID 툴에서 읽을 제품의 개수 선언
-    for(int i = 0; i < 2; i++)
-      IDTool_ID[i].RunParams.NumToFind = nNumtoFindID;
+
     
     // 툴 전체 실행
     // Run each tool using the RunTool function
@@ -110,61 +122,57 @@ public class CogToolBlockAdvancedScript : CogToolBlockAdvancedScriptBase
     // 좌 우 검사 결과 각각 표시 위해 2중 for 선언
     for(int idx = 0; idx < 2; idx++)
     {
-      // 검사 결과 읽은 코드 개수
-      int nIDCount = IDTool_ID[idx].Results.Count;      
-      nResultCount += nIDCount;
-      
-      // Y 중간 점 찾기 (위/아래 열 구분 위해)
-      double dMiddleY = 0;
-      for (int i = 0;i < nIDCount;i++)
-      {
-        dMiddleY += IDTool_ID[idx].Results[i].CenterY;
-      }
-      dMiddleY /= nIDCount; // dMiddleY 값보다 작으면 1열, 크면 2열
-    
+
       // 표시 할 코드 레이블 폰트 설정
       Font fFont = new Font(Label[idx][0].Font.Name, 6, FontStyle.Bold);
-	  
-      // ID 의 위치 정렬 위한 변수
-      int[] nIDNum = new int[nNumtoFindID];
-      sID[idx] = new string[nNumtoFindID];
-    
-      // 읽은 코드에서 가장 좌측 의 제품 X위치 찾기
-      double dMinX = ((Cognex.VisionPro.ICogImage) mToolBlock.Inputs["InputImage"].Value).Width;
-      for (int i = 0; i < nIDCount; i++)
-      {
-        // 첫 제품
-        dMinX = dMinX < IDTool_ID[idx].Results[i].CenterX ? dMinX : IDTool_ID[idx].Results[i].CenterX;
-      }
-    	  
-      for (int i = 0; i < nIDCount; i++)
-      {
-        // 현재 읽은 코드의 X, Y 위치 기준하여 몇번째 제품인지 특정
-        // X 첫 위치 기준 시작 위치 설정
-        int XPos = (int) ((IDTool_ID[idx].Results[i].CenterX - dMinX) / dPitchX);
-        int YPos = (int) (IDTool_ID[idx].Results[i].CenterY / dMiddleY) * nArray_X; // Y=2 경우만 고려
-        int nID = XPos + YPos;
-		
-        // 제품 위치 번호가 제품의 개수보다 클때 스킵
-        if (nID > nNumtoFindID)
-        {
-          continue;
-        }				
 
-        // 제품 위치에 맞춰 ID 보관      
-        sID[idx][nID] = IDTool_ID[idx].Results[i].DecodedData.DecodedString;
-        ToolBlock_ID[idx].Inputs[nID].Value = sID[idx][nID];
-      
-        // 읽은 코드 표시
-        double dArea = IDTool_ID[idx].Results[i].BoundsPolygon.Area;
-        Label[idx][nID].X = IDTool_ID[idx].Results[i].CenterX;
-        Label[idx][nID].Y = IDTool_ID[idx].Results[i].CenterY + Math.Sqrt(dArea) / 2 + 30;
-        Label[idx][nID].Text = "[" + (nID + 1).ToString() + "] " + sID[idx][nID];
-        Label[idx][nID].BackgroundColor = CogColorConstants.White;
-        Label[idx][nID].Color = CogColorConstants.Blue;
-        Label[idx][nID].Alignment = CogGraphicLabelAlignmentConstants.TopCenter;
-        Label[idx][nID].Font = fFont;
+      // 이번 기종에서 사용할 슬롯 수만큼 문자열 배열 확보
+      sID[idx] = new string[nNumtoFindID];
+
+      int nIDCount = 0; // (원하면) 인식 성공한 개수만 카운트
+
+      for (int slot = 0; slot < nNumtoFindID; slot++)
+      {
+        // 기본값: 미인식이면 빈 문자열
+        sID[idx][slot] = "";
+        ToolBlock_ID[idx].Inputs[slot].Value = "";
+
+        CogIDTool t = IDTools_ID[idx][slot];
+
+        if (t != null && t.Results != null && t.Results.Count > 0)
+        {
+          nIDCount++;
+
+          // 슬롯 번호에 직접 매핑 (slot=0 -> ID1)
+          sID[idx][slot] = t.Results[0].DecodedData.DecodedString;
+          ToolBlock_ID[idx].Inputs[slot].Value = sID[idx][slot];
+
+          // 라벨 표시 (이 슬롯 툴의 결과 좌표 그대로 사용)
+          double dArea = t.Results[0].BoundsPolygon.Area;
+          Label[idx][slot].X = t.Results[0].CenterX;
+          Label[idx][slot].Y = t.Results[0].CenterY + Math.Sqrt(dArea) / 2 + 30;
+          Label[idx][slot].Text = "[" + (slot + 1).ToString() + "] " + sID[idx][slot];
+          Label[idx][slot].BackgroundColor = CogColorConstants.White;
+          Label[idx][slot].Color = CogColorConstants.Blue;
+          Label[idx][slot].Alignment = CogGraphicLabelAlignmentConstants.TopCenter;
+          Label[idx][slot].Font = fFont;
+        }
+        else
+        {
+          // 미인식 슬롯에 표시를 남기고 싶으면 여기서 처리 (선택)
+          // Label[idx][slot].Text = "[" + (slot + 1).ToString() + "] NOREAD";
+        }
       }
+
+      // 기존 코드의 nResultCount 누적 방식과 맞추려면:
+      nResultCount += nIDCount;
+      
+      
+      
+      
+      
+      
+      
         
       // Recon ID 표시 초기화
       ReconLabel[idx] = new CogGraphicLabel();
