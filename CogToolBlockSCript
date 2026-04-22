@@ -55,7 +55,12 @@ public class CogToolBlockAdvancedScript : CogToolBlockAdvancedScriptBase
     }
     
     
-    CogIDTool[] IDTool_Recon = {(CogIDTool) mToolBlock.Tools["CogIDTool_Recon_L"],(CogIDTool) mToolBlock.Tools["CogIDTool_Recon_R"]};
+    CogIDTool[] IDTool_Recon = {
+      (CogIDTool) mToolBlock.Tools["CogIDTool_RECON_L"],
+      (CogIDTool) mToolBlock.Tools["CogIDTool_RECON_R"]
+      };
+    
+        
     int nArray_X = (int) ToolBlock_Spec.Outputs["Array_X"].Value;
     int nArray_Y = (int) ToolBlock_Spec.Outputs["Array_Y"].Value;
     int nNumtoFindID = nArray_X * nArray_Y;
@@ -104,14 +109,34 @@ public class CogToolBlockAdvancedScript : CogToolBlockAdvancedScriptBase
       }
     }
 	
+       
     
+    // 필요한 툴만 실행 (Spec, 각 슬롯 ID툴, Recon툴만)
+    // - CogToolBlock_Spec: Array_X/Array_Y 등 파라미터 계산에 필요
+    // - CogIDTool_ID_L/R(1..nNumtoFindID): 실제 사용하는 슬롯 수만큼만 실행
+    // - CogIDTool_Recon_L/R: Recon ID 읽기
 
+    // 1) Spec은 이미 값 읽었더라도, 스크립트에서 최신값 보장하려면 먼저 실행하는 편이 안전
+    mToolBlock.RunTool((ICogTool) ToolBlock_Spec, ref message, ref result);
+
+    // 2) 이번 기종에서 사용할 슬롯 수만큼만 ID Tool 실행 (좌/우)
+    for (int idx = 0; idx < 2; idx++)
+    {
+      for (int slot = 0; slot < nNumtoFindID; slot++)
+      {
+        ICogTool idTool = (ICogTool) IDTools_ID[idx][slot];
+        mToolBlock.RunTool(idTool, ref message, ref result);
+      }
+
+      // 3) Recon 실행 (좌/우)
+      mToolBlock.RunTool((ICogTool) IDTool_Recon[idx], ref message, ref result);
+    }
+
+    // (주의) 기존처럼 모든 툴을 돌리지 않기 때문에,
+    // IDTool_Recon 이 다른 전처리 툴(예: 이미지 변환/필터링)의 출력에 의존한다면
+    // 그 전처리 툴들도 여기서 함께 RunTool로 실행해줘야 합니다.
     
-    // 툴 전체 실행
-    // Run each tool using the RunTool function
-    foreach(ICogTool tool in mToolBlock.Tools)
-      mToolBlock.RunTool(tool, ref message, ref result);
-    
+        
     // 툴 결과 표시 및 생성
     // 결과 문자열
     string[] sReconID = new string[2];
